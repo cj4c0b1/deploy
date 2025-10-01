@@ -182,12 +182,26 @@ def portfolio_overview():
                     ]
     
     if len(filtered_portfolio_state) == 0:
-        st.warning("No data available for selected filters.")
         return
     
     # Convert to DataFrame
     portfolio_df = portfolio_state_to_df(filtered_portfolio_state)
-    total_balance_usd = round(portfolio_df["value"].sum(), 2)
+    
+    # Debug: Print DataFrame columns and first few rows
+    st.write("Debug - DataFrame columns:", portfolio_df.columns.tolist())
+    st.write("Debug - First few rows:", portfolio_df.head().to_dict('records'))
+    
+    # Safely calculate total balance
+    try:
+        if 'value' in portfolio_df.columns:
+            total_balance_usd = round(portfolio_df["value"].sum(), 2)
+        else:
+            st.warning("Warning: 'value' column not found in portfolio data. Showing 0 balance.")
+            st.warning(f"Available columns: {portfolio_df.columns.tolist()}")
+            total_balance_usd = 0.0
+    except Exception as e:
+        st.error(f"Error calculating total balance: {e}. Available columns: {portfolio_df.columns.tolist()}")
+        return
     
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -208,41 +222,119 @@ def portfolio_overview():
     c1, c2 = st.columns([1, 1])
     
     with c1:
-        # Portfolio allocation pie chart
-        portfolio_df['% Allocation'] = (portfolio_df['value'] / total_balance_usd) * 100
-        portfolio_df['label'] = portfolio_df['token'] + ' ($' + portfolio_df['value'].apply(
-            lambda x: f'{x:,.2f}') + ')'
+        # Check if required columns exist
+        required_columns = ['value', 'token', 'account', 'exchange']
+        missing_columns = [col for col in required_columns if col not in portfolio_df.columns]
         
-        fig = px.sunburst(portfolio_df,
-                          path=['account', 'exchange', 'label'],
-                          values='value',
-                          hover_data={'% Allocation': ':.2f'},
-                          title='Portfolio Allocation',
-                          color='account',
-                          color_discrete_sequence=px.colors.qualitative.Vivid)
-        
-        fig.update_traces(textinfo='label+percent entry')
-        fig.update_layout(margin=dict(t=50, l=0, r=0, b=0), height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        if missing_columns:
+            st.error(f"Missing required columns for visualization: {', '.join(missing_columns)}")
+            st.warning(f"Available columns: {portfolio_df.columns.tolist()}")
+        elif total_balance_usd <= 0:
+            st.warning("Total balance is zero or negative. Cannot calculate allocations.")
+        else:
+            try:
+                # Portfolio allocation visualization
+                portfolio_df['% Allocation'] = (portfolio_df['value'] / total_balance_usd) * 100
+                portfolio_df['label'] = portfolio_df['token'] + ' ($' + portfolio_df['value'].apply(
+                    lambda x: f'{x:,.2f}') + ')'
+                
+                fig = px.sunburst(
+                    portfolio_df,
+                    path=['account', 'exchange', 'label'],
+                    values='value',
+                    hover_data={'% Allocation': ':.2f'},
+                    title='Portfolio Allocation',
+                    color='account',
+                    color_discrete_sequence=px.colors.qualitative.Vivid
+                )
+                
+                fig.update_traces(textinfo='label+percent entry')
+                fig.update_layout(margin=dict(t=50, l=0, r=0, b=0), height=600)
+                st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Error creating portfolio visualization: {str(e)}")
+                st.warning("Debug info - DataFrame sample:")
+                st.write(portfolio_df.head().to_dict('records'))
     
     with c2:
         # Token distribution
-        token_distribution = portfolio_df.groupby('token')['value'].sum().reset_index()
-        token_distribution = token_distribution.sort_values('value', ascending=False)
-        
-        fig = px.bar(token_distribution, x='token', y='value', 
-                     title='Token Distribution',
-                     color='value',
-                     color_continuous_scale='Blues')
-        fig.update_layout(xaxis_title='Token', yaxis_title='Value (USD)', height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            if 'token' not in portfolio_df.columns or 'value' not in portfolio_df.columns:
+                st.warning("Cannot display token distribution: Missing required columns.")
+                if 'token' not in portfolio_df.columns:
+                    st.warning("- 'token' column is missing")
+                if 'value' not in portfolio_df.columns:
+                    st.warning("- 'value' column is missing")
+            else:
+                token_distribution = portfolio_df.groupby('token')['value'].sum().reset_index()
+                token_distribution = token_distribution.sort_values('value', ascending=False)
+                
+                if not token_distribution.empty:
+                    fig = px.bar(
+                        token_distribution, 
+                        x='token', 
+                        y='value',
+                        title='Token Distribution',
+                        color='value',
+                        color_continuous_scale='Blues',
+                        labels={'value': 'Value (USD)', 'token': 'Token'}
+                    )
+                    fig.update_layout(
+                        xaxis_title='Token',
+                        yaxis_title='Value (USD)',
+                        coloraxis_colorbar=dict(title='Value (USD)')
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No token distribution data available.")
+        except Exception as e:
+            st.error(f"Error creating token distribution: {str(e)}")
+            st.warning("Debug info - DataFrame columns:")
+            st.write(portfolio_df.columns.tolist())
+            if 'token' in portfolio_df.columns:
+                st.warning("Sample token values:")
+                st.write(portfolio_df['token'].head().tolist())
+            if 'value' in portfolio_df.columns:
+                st.warning("Sample value statistics:")
+                st.write(portfolio_df['value'].describe().to_dict())
     
     # Portfolio details table
     st.subheader("Portfolio Details")
-    st.dataframe(
-        portfolio_df[['account', 'exchange', 'token', 'units', 'price', 'value', 'available_units']], 
-        use_container_width=True
-    )
+    
+    # Define the columns we'd like to show, in order of preference
+    desired_columns = [
+        'account', 'exchange', 'token', 'units', 'available_units', 'price', 'value'
+    ]
+    
+    # Filter to only include columns that exist in the DataFrame
+    available_columns = [col for col in desired_columns if col in portfolio_df.columns]
+    
+    if not available_columns:
+        st.warning("No valid columns available for the portfolio details table.")
+        st.warning(f"Available columns: {portfolio_df.columns.tolist()}")
+    else:
+        # Show which columns are being displayed
+        missing_columns = set(desired_columns) - set(available_columns)
+        if missing_columns:
+            st.warning(f"Note: Some columns are not available: {', '.join(sorted(missing_columns))}")
+        
+        # Display the table with available columns
+        try:
+            st.dataframe(
+                portfolio_df[available_columns],
+                use_container_width=True,
+                column_config={
+                    'value': st.column_config.NumberColumn('Value (USD)', format='$%.2f'),
+                    'price': st.column_config.NumberColumn('Price', format='$%.8f'),
+                    'units': st.column_config.NumberColumn('Units', format='%.8f'),
+                    'available_units': st.column_config.NumberColumn('Available Units', format='%.8f')
+                }
+            )
+        except Exception as e:
+            st.error(f"Error displaying portfolio details: {str(e)}")
+            st.warning("Debug info - DataFrame sample:")
+            st.write(portfolio_df.head().to_dict('records'))
 
 
 @st.fragment
