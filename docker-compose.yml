@@ -8,10 +8,11 @@ services:
       - "8501:8501"
     environment:
         - AUTH_SYSTEM_ENABLED=False
-        - BACKEND_API_HOST=hummingbot-api
+        - BACKEND_API_HOST=hummingbot-api  # Use the service name for internal Docker networking
         - BACKEND_API_PORT=8000
         - BACKEND_API_USERNAME=${USERNAME}
         - BACKEND_API_PASSWORD=${PASSWORD}
+        - BACKEND_API_ENDPOINT=/  # Use the root endpoint for health checks
     volumes:
       - ./credentials.yml:/home/dashboard/credentials.yml
       - ./pages:/home/dashboard/frontend/pages
@@ -20,6 +21,9 @@ services:
   hummingbot-api:
     container_name: hummingbot-api
     image: hummingbot/hummingbot-api:latest
+    entrypoint: /bin/sh
+    command: -c 'sleep 15 && uvicorn main:app --host 0.0.0.0 --port 8000 --reload'
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
@@ -35,6 +39,7 @@ services:
       - emqx-bridge
     depends_on:
       - postgres
+      - emqx
   emqx:
     container_name: hummingbot-broker
     image: emqx:5
