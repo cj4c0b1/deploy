@@ -17,16 +17,36 @@ def portfolio_state_to_df(portfolio_state):
     for account, exchanges in portfolio_state.items():
         for exchange, tokens_info in exchanges.items():
             for info in tokens_info:
-                data.append({
+                # Calculate value if not present
+                if 'value' not in info and all(k in info for k in ['price', 'units']):
+                    info['value'] = info['price'] * info['units']
+                
+                # Create the data dictionary with fallbacks for missing keys
+                row = {
                     "account": account,
                     "exchange": exchange,
-                    "token": info["token"],
-                    "price": info["price"],
-                    "units": info["units"],
-                    "value": info["value"],
-                    "available_units": info["available_units"],
-                })
-    return pd.DataFrame(data)
+                    "token": info.get("token", ""),
+                    "price": info.get("price", 0.0),
+                    "units": info.get("units", 0.0),
+                    "available_units": info.get("available_units", 0.0),
+                }
+                
+                # Only add value if it exists
+                if 'value' in info:
+                    row["value"] = info["value"]
+                
+                data.append(row)
+    
+    # Create DataFrame and ensure numeric columns have the correct type
+    df = pd.DataFrame(data)
+    
+    # Convert numeric columns to float, handling any potential non-numeric values
+    numeric_cols = ['price', 'units', 'value', 'available_units']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+    
+    return df
 
 
 # Convert historical portfolio states to DataFrame
@@ -191,17 +211,18 @@ def portfolio_overview():
     st.write("Debug - DataFrame columns:", portfolio_df.columns.tolist())
     st.write("Debug - First few rows:", portfolio_df.head().to_dict('records'))
     
-    # Safely calculate total balance
-    try:
-        if 'value' in portfolio_df.columns:
-            total_balance_usd = round(portfolio_df["value"].sum(), 2)
-        else:
-            st.warning("Warning: 'value' column not found in portfolio data. Showing 0 balance.")
-            st.warning(f"Available columns: {portfolio_df.columns.tolist()}")
-            total_balance_usd = 0.0
-    except Exception as e:
-        st.error(f"Error calculating total balance: {e}. Available columns: {portfolio_df.columns.tolist()}")
-        return
+    # Calculate total balance
+    if 'value' in portfolio_df.columns:
+        total_balance_usd = round(portfolio_df["value"].sum(), 2)
+    elif all(col in portfolio_df.columns for col in ['price', 'units']):
+        # Calculate value from price * units if value column is missing
+        portfolio_df['value'] = portfolio_df['price'] * portfolio_df['units']
+        total_balance_usd = round(portfolio_df["value"].sum(), 2)
+        st.info("Calculated portfolio value from price × units")
+    else:
+        st.warning("Cannot calculate portfolio value: missing required columns.")
+        st.warning(f"Available columns: {portfolio_df.columns.tolist()}")
+        total_balance_usd = 0.0
     
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)

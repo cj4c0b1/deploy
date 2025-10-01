@@ -65,10 +65,6 @@ services:
       timeout: 25s
       retries: 5
 
-networks:
-  emqx-bridge:
-    driver: bridge
-
   postgres:
     container_name: hummingbot-postgres
     image: postgres:15
@@ -94,7 +90,7 @@ networks:
     driver: bridge
 
 volumes:
-  emqx-data: { }
-  emqx-log: { }
-  emqx-etc: { }
-  postgres-data: { }
+  emqx-data: {}
+  emqx-log: {}
+  emqx-etc: {}
+  postgres-data: {}
